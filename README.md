@@ -52,7 +52,7 @@
 
 - **💻 响应式设计**：响应式布局自动适配PC和大部分手机端浏览器
 
-- **📧 邮件发送**：集成Resend发送邮件，支持群发，内嵌图片和附件发送，发送状态查看
+- **📧 邮件发送**：支持多 Provider 发送（Resend / Brevo），支持群发，内嵌图片和附件发送，发送状态查看
 
 - **🛡️ 管理员功能**：可以对用户，邮件进行管理，RABC权限控制对功能及使用资源限制
 
@@ -84,7 +84,7 @@
 
 - **UI框架**：[Element Plus](https://element-plus.org/) 
 
-- **邮件推送：** [Resend](https://resend.com/)
+- **邮件推送：** [Resend](https://resend.com/) / [Brevo](https://www.brevo.com/)
 
 - **缓存**：[Cloudflare KV](https://developers.cloudflare.com/kv/)
 
@@ -151,6 +151,5 @@ cloud-mail
 ## 交流
 
 [Telegram](https://t.me/cloud_mail_tg)
-
 
 

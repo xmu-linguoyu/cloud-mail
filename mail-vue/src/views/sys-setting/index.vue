@@ -177,7 +177,25 @@
                 </div>
               </div>
               <div class="setting-item">
-                <div><span>{{ $t('resendToken') }}</span></div>
+                <div><span>{{ $t('sendProvider') }}</span></div>
+                <div>
+                  <el-select
+                      @change="change"
+                      :style="`width: ${ locale === 'en' ? 110 : 95 }px;`"
+                      v-model="setting.sendProvider"
+                      placeholder="Select"
+                  >
+                    <el-option
+                        v-for="item in sendProviderOptions"
+                        :key="item.value"
+                        :label="item.label"
+                        :value="item.value"
+                    />
+                  </el-select>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div><span>{{ $t('providerToken') }}</span></div>
                 <div>
                   <el-button class="opt-button" style="margin-top: 0" @click="openResendList" size="small"
                              type="primary">
@@ -413,7 +431,7 @@
           <el-button type="primary" :loading="settingLoading" @click="saveTitle">{{ $t('save') }}</el-button>
         </form>
       </el-dialog>
-      <el-dialog v-model="resendTokenFormShow" :title="$t('resendToken')" width="340" @closed="cleanResendTokenForm">
+      <el-dialog v-model="resendTokenFormShow" :title="$t('providerToken')" width="340" @closed="cleanResendTokenForm">
         <form>
           <el-select style="margin-bottom: 15px" v-model="resendTokenForm.domain" placeholder="Select">
             <el-option
@@ -423,7 +441,7 @@
                 :value="item"
             />
           </el-select>
-          <el-input type="text" :placeholder="$t('addResendTokenDesc')" v-model="resendTokenForm.token"/>
+          <el-input type="text" :placeholder="$t('addProviderTokenDesc')" v-model="resendTokenForm.token"/>
           <el-button type="primary" :loading="settingLoading" @click="saveResendToken">{{ $t('save') }}</el-button>
         </form>
       </el-dialog>
@@ -593,8 +611,8 @@
           </div>
         </template>
       </el-dialog>
-      <el-dialog class="resend-table" v-model="showResendList" :title="$t('resendTokenList')">
-        <el-table :data="resendList">
+      <el-dialog class="resend-table" v-model="showResendList" :title="$t('providerToken')">
+        <el-table :data="providerTokenList">
           <el-table-column :min-width="emailColumnWidth" property="key" :label="$t('domain')"
                            :show-overflow-tooltip="true"/>
           <el-table-column :width="tokenColumnWidth" property="value" label="Token" fixed="right"
@@ -836,6 +854,11 @@ const authRefreshOptions = computed(() => [
   {label: '20s', value: 20},
 ])
 
+const sendProviderOptions = computed(() => [
+  {label: t('resendProvider'), value: 'resend'},
+  {label: t('brevoProvider'), value: 'brevo'}
+])
+
 const tgChatId = ref([])
 const customDomain = ref('')
 const tgBotStatus = ref(0)
@@ -860,6 +883,8 @@ getUpdate()
 
 function getSettings() {
   settingQuery().then(settingData => {
+    settingData.sendProvider = settingData.sendProvider || 'resend'
+    settingData.brevoTokens = settingData.brevoTokens || {}
     setting.value = settingData
     settingStore.domainList = settingData.domainList;
     resendTokenForm.domain = setting.value.domainList[0]
@@ -901,12 +926,13 @@ function resetAddS3Form() {
   s3.forcePathStyle = setting.value.forcePathStyle
 }
 
-const resendList = computed(() => {
-
-  let list = Object.keys(setting.value.resendTokens).map(key => {
+const providerTokenList = computed(() => {
+  const providerTokenKey = getProviderTokenKey();
+  const tokenObj = setting.value[providerTokenKey] || {};
+  let list = Object.keys(tokenObj).map(key => {
     return {
       key: key,
-      value: setting.value.resendTokens[key]
+      value: tokenObj[key]
     };
   })
 
@@ -922,6 +948,10 @@ const resendList = computed(() => {
 
   return list;
 });
+
+function getProviderTokenKey() {
+  return setting.value.sendProvider === 'brevo' ? 'brevoTokens' : 'resendTokens';
+}
 
 function getUpdate() {
   if (getUpdateErrorCount > 5 || !getUpdateErrorCount) return
@@ -1246,17 +1276,18 @@ function openResendForm() {
 }
 
 function saveResendToken() {
-  const settingForm = {
-    resendTokens: {}
-  }
+  const tokenKey = getProviderTokenKey();
+  const settingForm = {}
+  settingForm[tokenKey] = {}
   const domain = resendTokenForm.domain.slice(1)
-  settingForm.resendTokens[domain] = resendTokenForm.token
+  settingForm[tokenKey][domain] = resendTokenForm.token
   editSetting(settingForm)
 }
 
 function backupSetting() {
   const settingForm = {...setting.value}
   delete settingForm.resendTokens
+  delete settingForm.brevoTokens
   delete settingForm.siteKey
   delete settingForm.secretKey
   backup = JSON.stringify(setting.value)
@@ -1279,6 +1310,7 @@ function change(e) {
   delete settingForm.s3AccessKey
   delete settingForm.s3SecretKey
   delete settingForm.resendTokens
+  delete settingForm.brevoTokens
   editSetting(settingForm, false)
 }
 

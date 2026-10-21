@@ -13,7 +13,9 @@ const settingService = {
 
 	async refresh(c) {
 		const settingRow = await orm(c).select().from(setting).get();
+		settingRow.sendProvider = settingRow.sendProvider || 'resend';
 		settingRow.resendTokens = JSON.parse(settingRow.resendTokens);
+		settingRow.brevoTokens = JSON.parse(settingRow.brevoTokens || '{}');
 		c.set('setting', settingRow);
 		await c.env.kv.put(KvConst.SETTING, JSON.stringify(settingRow));
 	},
@@ -76,6 +78,8 @@ const settingService = {
 		setting.linuxdoSwitch = linuxdoSwitch;
 
 		setting.emailPrefixFilter = setting.emailPrefixFilter.split(",").filter(Boolean);
+		setting.sendProvider = setting.sendProvider || 'resend';
+		setting.brevoTokens = setting.brevoTokens || {};
 
 		c.set?.('setting', setting);
 		return setting;
@@ -97,6 +101,9 @@ const settingService = {
 
 		Object.keys(settingRow.resendTokens).forEach(key => {
 			settingRow.resendTokens[key] = `${settingRow.resendTokens[key].slice(0, 12)}******`;
+		});
+		Object.keys(settingRow.brevoTokens).forEach(key => {
+			settingRow.brevoTokens[key] = `${settingRow.brevoTokens[key].slice(0, 12)}******`;
 		});
 
 		settingRow.s3AccessKey = settingRow.s3AccessKey ? `${settingRow.s3AccessKey.slice(0, 12)}******` : null;
@@ -126,15 +133,24 @@ const settingService = {
 	async set(c, params) {
 		const settingData = await this.query(c);
 		let resendTokens = { ...settingData.resendTokens, ...params.resendTokens };
+		let brevoTokens = { ...settingData.brevoTokens, ...params.brevoTokens };
 		Object.keys(resendTokens).forEach(domain => {
 			if (!resendTokens[domain]) delete resendTokens[domain];
+		});
+		Object.keys(brevoTokens).forEach(domain => {
+			if (!brevoTokens[domain]) delete brevoTokens[domain];
 		});
 
 		if (Array.isArray(params.emailPrefixFilter)) {
 			params.emailPrefixFilter = params.emailPrefixFilter + '';
 		}
 
+		if (params.sendProvider && !['resend', 'brevo'].includes(params.sendProvider)) {
+			delete params.sendProvider;
+		}
+
 		params.resendTokens = JSON.stringify(resendTokens);
+		params.brevoTokens = JSON.stringify(brevoTokens);
 		await orm(c).update(setting).set({ ...params }).returning().get();
 		await this.refresh(c);
 	},
