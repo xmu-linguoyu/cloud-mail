@@ -16,17 +16,52 @@ const settingService = {
 			return;
 		}
 
-		const sqlList = [
-			`ALTER TABLE setting ADD COLUMN send_provider TEXT NOT NULL DEFAULT 'resend';`,
-			`ALTER TABLE setting ADD COLUMN brevo_tokens TEXT NOT NULL DEFAULT '{}';`
+		const columns = [
+			{
+				name: 'send_provider',
+				sql: `ALTER TABLE setting ADD COLUMN send_provider TEXT NOT NULL DEFAULT 'resend';`
+			},
+			{
+				name: 'brevo_tokens',
+				sql: `ALTER TABLE setting ADD COLUMN brevo_tokens TEXT NOT NULL DEFAULT '{}';`
+			}
 		];
 
-		for (const sql of sqlList) {
-			try {
-				await c.env.db.prepare(sql).run();
-			} catch (e) {
-				console.warn(`跳过字段：${e.message}`);
+		const getColumnNames = async () => {
+			const { results = [] } = await c.env.db
+				.prepare(`SELECT name FROM pragma_table_info('setting')`)
+				.all();
+			return new Set(results.map(row => row.name));
+		};
+
+		let existingColumns = await getColumnNames();
+
+		for (const column of columns) {
+			if (existingColumns.has(column.name)) {
+				continue;
 			}
+
+			try {
+				await c.env.db.prepare(column.sql).run();
+			} catch (e) {
+				// Another request may have added the column concurrently. Only
+				// ignore the error when the column is actually present afterwards.
+				existingColumns = await getColumnNames();
+				if (!existingColumns.has(column.name)) {
+					throw new Error(`无法补齐 setting.${column.name}: ${e.message}`);
+				}
+			}
+
+			existingColumns.add(column.name);
+		}
+
+		existingColumns = await getColumnNames();
+		const missingColumns = columns
+			.filter(column => !existingColumns.has(column.name))
+			.map(column => column.name);
+
+		if (missingColumns.length > 0) {
+			throw new Error(`setting 表缺少必要字段: ${missingColumns.join(', ')}`);
 		}
 
 		c.set?.('__settingProviderColumnsReady', true);
