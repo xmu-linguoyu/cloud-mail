@@ -11,7 +11,29 @@ import verifyRecordService from './verify-record-service';
 
 const settingService = {
 
+	async ensureProviderColumns(c) {
+		if (c.get?.('__settingProviderColumnsReady')) {
+			return;
+		}
+
+		const sqlList = [
+			`ALTER TABLE setting ADD COLUMN send_provider TEXT NOT NULL DEFAULT 'resend';`,
+			`ALTER TABLE setting ADD COLUMN brevo_tokens TEXT NOT NULL DEFAULT '{}';`
+		];
+
+		for (const sql of sqlList) {
+			try {
+				await c.env.db.prepare(sql).run();
+			} catch (e) {
+				console.warn(`跳过字段：${e.message}`);
+			}
+		}
+
+		c.set?.('__settingProviderColumnsReady', true);
+	},
+
 	async refresh(c) {
+		await this.ensureProviderColumns(c);
 		const settingRow = await orm(c).select().from(setting).get();
 		settingRow.sendProvider = settingRow.sendProvider || 'resend';
 		settingRow.resendTokens = JSON.parse(settingRow.resendTokens);
@@ -131,6 +153,7 @@ const settingService = {
 	},
 
 	async set(c, params) {
+		await this.ensureProviderColumns(c);
 		const settingData = await this.query(c);
 		let resendTokens = { ...settingData.resendTokens, ...params.resendTokens };
 		let brevoTokens = { ...settingData.brevoTokens, ...params.brevoTokens };
