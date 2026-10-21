@@ -359,9 +359,13 @@ const emailService = {
 	},
 
 	async sendByProvider(provider, providerToken, params) {
+		const attachments = this.normalizeProviderAttachments([
+			...(params.imageDataList || []),
+			...(params.attachments || [])
+		]);
 
 		if (provider === 'brevo') {
-			return this.sendByBrevo(providerToken, params);
+			return this.sendByBrevo(providerToken, params, attachments);
 		}
 
 		const resend = new Resend(providerToken);
@@ -371,9 +375,12 @@ const emailService = {
 			to: [...params.receiveEmail],
 			subject: params.subject,
 			text: params.text,
-			html: params.html,
-			attachments: [...params.imageDataList, ...params.attachments]
+			html: params.html
 		};
+
+		if (attachments.length > 0) {
+			sendForm.attachments = attachments;
+		}
 
 		if (params.sendType === 'reply') {
 			sendForm.headers = {
@@ -390,8 +397,8 @@ const emailService = {
 		};
 	},
 
-	async sendByBrevo(providerToken, params) {
-		const attachments = await this.toBrevoAttachments([...params.imageDataList, ...params.attachments]);
+	async sendByBrevo(providerToken, params, providerAttachments) {
+		const attachments = await this.toBrevoAttachments(providerAttachments);
 		const sendForm = {
 			sender: {
 				name: params.name,
@@ -400,9 +407,12 @@ const emailService = {
 			to: params.receiveEmail.map(email => ({ email })),
 			subject: params.subject,
 			htmlContent: params.html,
-			textContent: params.text || undefined,
-			attachment: attachments
+			textContent: params.text || undefined
 		};
+
+		if (attachments.length > 0) {
+			sendForm.attachment = attachments;
+		}
 
 		if (params.sendType === 'reply') {
 			sendForm.headers = {
@@ -434,6 +444,58 @@ const emailService = {
 		return {
 			messageId: body?.messageId || null
 		};
+	},
+
+	normalizeProviderAttachments(attachments = []) {
+		return attachments.reduce((list, attachment) => {
+			if (!attachment || typeof attachment !== 'object') {
+				return list;
+			}
+
+			const content = this.normalizeAttachmentContent(attachment.content);
+			const path = typeof attachment.path === 'string' && attachment.path.trim()
+				? attachment.path
+				: undefined;
+
+			if (!content && !path) {
+				return list;
+			}
+
+			list.push({
+				...attachment,
+				filename: attachment.filename || this.deriveAttachmentFilename(attachment),
+				content,
+				path,
+				contentType: attachment.contentType || attachment.mimeType
+			});
+
+			return list;
+		}, []);
+	},
+
+	normalizeAttachmentContent(content) {
+		if (typeof content !== 'string') {
+			return content;
+		}
+
+		return content.replace(/^data:[^;,]+;base64,/, '');
+	},
+
+	deriveAttachmentFilename(attachment) {
+		const source = attachment.key || attachment.path;
+		if (typeof source !== 'string' || !source) {
+			return 'attachment.bin';
+		}
+
+		try {
+			const path = source.includes('://')
+				? new URL(source).pathname
+				: source.split('?')[0];
+			const filename = decodeURIComponent(path.split('/').pop() || '');
+			return filename || 'attachment.bin';
+		} catch {
+			return 'attachment.bin';
+		}
 	},
 
 	async toBrevoAttachments(attachments) {
