@@ -6,6 +6,7 @@ on:
     paths:
       - "mail-worker/**"
       - "mail-vue/**"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 jobs:
