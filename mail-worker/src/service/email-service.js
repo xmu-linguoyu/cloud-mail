@@ -160,10 +160,10 @@ const emailService = {
 			text, //邮件纯文本
 			content, //邮件内容
 			subject, //邮件标题
-			attachments //附件
+			attachments = [] //附件
 		} = params;
 
-		const { resendTokens, r2Domain, send, domainList } = await settingService.query(c);
+		const { resendTokens, brevoTokens, sendProvider, r2Domain, send, domainList } = await settingService.query(c);
 
 		let { imageDataList, html } = await attService.toImageUrlHtml(c, content);
 
@@ -229,11 +229,13 @@ const emailService = {
 		}
 
 		const domain = emailUtils.getDomain(accountRow.email);
-		const resendToken = resendTokens[domain];
+		const provider = ['resend', 'brevo'].includes(sendProvider) ? sendProvider : 'resend';
+		const providerTokens = provider === 'brevo' ? brevoTokens : resendTokens;
+		const providerToken = providerTokens[domain];
 
-		//如果接收方存在站外邮箱，又没有resend token
-		if (!resendToken && !allInternal) {
-			throw new BizError(t('noResendToken'));
+		//如果接收方存在站外邮箱，又没有provider token
+		if (!providerToken && !allInternal) {
+			throw new BizError(t('noProviderToken', { provider }));
 		}
 
 		//没有发件人名字自动截取
@@ -256,38 +258,27 @@ const emailService = {
 
 		}
 
-		let resendResult = {};
+		let sendResult = {};
 
-		//存在站外时邮箱全部由resend发送
+		//存在站外时邮箱全部由provider发送
 		if (!allInternal) {
-
-			const resend = new Resend(resendToken);
-
-			const sendForm = {
-				from: `${name} <${accountRow.email}>`,
-				to: [...receiveEmail],
-				subject: subject,
-				text: text,
-				html: html,
-				attachments: [...imageDataList, ...attachments]
-			};
-
-			if (sendType === 'reply') {
-				sendForm.headers = {
-					'in-reply-to': emailRow.messageId,
-					'references': emailRow.messageId
-				};
-			}
-
-			resendResult = await resend.emails.send(sendForm);
+			sendResult = await this.sendByProvider(provider, providerToken, {
+				name,
+				accountEmail: accountRow.email,
+				receiveEmail,
+				subject,
+				text,
+				html,
+				sendType,
+				emailRow,
+				imageDataList,
+				attachments
+			});
 
 		}
 
-		const { data, error } = resendResult;
-
-
-		if (error) {
-			throw new BizError(error.message);
+		if (sendResult.error) {
+			throw new BizError(sendResult.error.message);
 		}
 
 		imageDataList = imageDataList.map(item => ({...item, contentId: `<${item.contentId}>`}))
@@ -306,7 +297,7 @@ const emailService = {
 		emailData.status = emailConst.status.SENT;
 		emailData.type = emailConst.type.SEND;
 		emailData.userId = userId;
-		emailData.resendEmailId = data?.id;
+		emailData.resendEmailId = sendResult.messageId;
 
 		const recipient = [];
 
@@ -365,6 +356,125 @@ const emailService = {
 		}
 
 		return [ emailResult ];
+	},
+
+	async sendByProvider(provider, providerToken, params) {
+
+		if (provider === 'brevo') {
+			return this.sendByBrevo(providerToken, params);
+		}
+
+		const resend = new Resend(providerToken);
+
+		const sendForm = {
+			from: `${params.name} <${params.accountEmail}>`,
+			to: [...params.receiveEmail],
+			subject: params.subject,
+			text: params.text,
+			html: params.html,
+			attachments: [...params.imageDataList, ...params.attachments]
+		};
+
+		if (params.sendType === 'reply') {
+			sendForm.headers = {
+				'in-reply-to': params.emailRow.messageId,
+				'references': params.emailRow.messageId
+			};
+		}
+
+		const { data, error } = await resend.emails.send(sendForm);
+
+		return {
+			messageId: data?.id,
+			error
+		};
+	},
+
+	async sendByBrevo(providerToken, params) {
+		const attachments = await this.toBrevoAttachments([...params.imageDataList, ...params.attachments]);
+		const sendForm = {
+			sender: {
+				name: params.name,
+				email: params.accountEmail
+			},
+			to: params.receiveEmail.map(email => ({ email })),
+			subject: params.subject,
+			htmlContent: params.html,
+			textContent: params.text || undefined,
+			attachment: attachments
+		};
+
+		if (params.sendType === 'reply') {
+			sendForm.headers = {
+				'In-Reply-To': params.emailRow.messageId,
+				'References': params.emailRow.messageId
+			};
+		}
+
+		const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+			method: 'POST',
+			headers: {
+				'api-key': providerToken,
+				'content-type': 'application/json',
+				'accept': 'application/json'
+			},
+			body: JSON.stringify(sendForm)
+		});
+
+		const body = await response.json().catch(() => ({}));
+
+		if (!response.ok) {
+			return {
+				error: {
+					message: body?.message || `Brevo API request failed with status ${response.status}`
+				}
+			};
+		}
+
+		return {
+			messageId: body?.messageId || null
+		};
+	},
+
+	async toBrevoAttachments(attachments) {
+		const list = [];
+
+		for (const attachment of attachments) {
+			let content = attachment.content;
+
+			if (!content && attachment.path) {
+				const response = await fetch(attachment.path);
+				if (!response.ok) {
+					throw new BizError(`Failed to load inline attachment: ${attachment.filename || attachment.path}`);
+				}
+				const arrayBuffer = await response.arrayBuffer();
+				content = this.arrayBufferToBase64(arrayBuffer);
+			}
+
+			if (!content) {
+				continue;
+			}
+
+			list.push({
+				name: attachment.filename || 'attachment',
+				content
+			});
+		}
+
+		return list;
+	},
+
+	arrayBufferToBase64(arrayBuffer) {
+		let binary = '';
+		const bytes = new Uint8Array(arrayBuffer);
+		const chunkSize = 0x8000;
+
+		for (let i = 0; i < bytes.length; i += chunkSize) {
+			const chunk = bytes.subarray(i, i + chunkSize);
+			binary += String.fromCharCode(...chunk);
+		}
+
+		return btoa(binary);
 	},
 
 	//处理站内邮件发送

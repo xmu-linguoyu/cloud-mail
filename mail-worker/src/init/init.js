@@ -28,8 +28,26 @@ const dbInit = {
 		await this.v2_7DB(c);
 		await this.v2_8DB(c);
 		await this.v2_9DB(c);
+		await this.v2_10DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
+	},
+
+	async v2_10DB(c) {
+		const SQL_LIST = [
+			`ALTER TABLE setting ADD COLUMN send_provider TEXT NOT NULL DEFAULT 'resend';`,
+			`ALTER TABLE setting ADD COLUMN brevo_tokens TEXT NOT NULL DEFAULT '{}';`
+		];
+
+		const promises = SQL_LIST.map(async (sql) => {
+			try {
+				await c.env.db.prepare(sql).run();
+			} catch (e) {
+				console.warn(`跳过字段：${e.message}`);
+			}
+		});
+
+		await Promise.all(promises);
 	},
 
 	async v2_9DB(c) {
