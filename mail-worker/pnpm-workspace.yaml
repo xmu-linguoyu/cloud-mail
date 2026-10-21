@@ -1,4 +1,5 @@
 # Native build scripts required by the Worker toolchain.
+packages: []
 allowBuilds:
   esbuild: true
   sharp: true
